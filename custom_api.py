@@ -108,19 +108,63 @@ def mimic_custom_api(path: str):
     ctx.update(**decompose_inner_tokens(tokens))
     return ctx
 
-if __name__ == "__main__":   
-    test_pairs = {                       
-        'api/oil/series/BRENT/m/eop/2015/2017/csv':                   
-        {'domain': 'oil',
-         'varname': 'BRENT',
-         'freq': 'm',
-         'rate': None,
-         'start': '2015',
-         'end': '2017',
-         'agg': 'eop',
-         'fin': 'csv'
-         }
+if __name__ == "__main__":
+    # api/{domain}/series/{varname}/{freq}/{?suffix}/{?start}/{?end}/{?finaliser}
+    # {?rate}/{?agg} are mutually exclusive, we can either have {?rate} or {?agg}, so better call them {?suffix}
+    # if {?suffix} is in (eop, avg) then {agg} is defined
+    # if {?suffix} is in (yoy, rog) then {rate} is defined
+    test_pairs = {
+        'api/oil/series/BRENT/m/eop/2015/2017/csv': {
+            'domain': 'oil',
+            'varname': 'BRENT',
+            'freq': 'm',
+            'rate': None,
+            'start': '2015',
+            'end': '2017',
+            'agg': 'eop',
+            'fin': 'csv'
+        },
+        'api/ru/series/USDRUR/m/avg/2017': {
+            'domain': 'ru',
+            'varname': 'USDRUR',
+            'freq': 'm',
+            'rate': None,
+            'agg': 'avg',
+            'fin': None,
+            'start': '2017',
+            'end': None
+        },
+        'api/ru/series/USDRUR/m/eop/1998/2000/xlsx': {
+            'domain': 'ru',
+            'varname': 'USDRUR',
+            'freq': 'm',
+            'rate': None,
+            'agg': 'eop',
+            'fin': 'xlsx',
+            'start': '1998',
+            'end': '2000'
+        },
+        'api/ru/series/INDPRO/a/yoy/2013/2015/info': {
+            'domain': 'ru',
+            'varname': 'INDPRO',
+            'freq': 'a',
+            'rate': 'yoy',
+            'agg': None,
+            'fin': 'info',
+            'start': '2013',
+            'end': '2015'
+        },
+        'api/oil/series/BRENT/q/rog/2005/2007/json': {
+            'domain': 'oil',
+            'varname': 'BRENT',
+            'freq': 'q',
+            'rate': 'rog',
+            'agg': None,
+            'fin': 'json',
+            'start': '2005',
+            'end': '2007'
+        }
     }
         
     for url, d in test_pairs.items():
-        assert mimic_custom_api(url) == d    
+        assert mimic_custom_api(url) == d
