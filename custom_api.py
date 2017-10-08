@@ -56,17 +56,15 @@ def decompose_inner_path(inner_path: str):
 
 
 def decompose_inner_tokens(tokens):
-    start, end = get_years(tokens)
-    return dict(rate=assign_values(tokens, ALLOWED_REAL_RATES),
-                agg=assign_values(tokens, ALLOWED_AGGREGATORS),
-                fin=assign_values(tokens, ALLOWED_FINALISERS),
-                start=start,
-                end=end)
+    s, e = get_years(tokens)
+    return dict(rate  = assign_values(tokens, ALLOWED_REAL_RATES),
+                agg   = assign_values(tokens, ALLOWED_AGGREGATORS),
+                fin   = assign_values(tokens, ALLOWED_FINALISERS),
+                start = s,
+                end   = e)
 
 
-def validate_freq(freq: str):
-    return assign_values([freq], ALLOWED_FREQUENCIES)
-
+        
 # NOT USED NOW:
 #BASE_URL = 'api/series/{string:domain}/{string:varname}/{string:freq}'
 #@ts.route(f'{BASE_URL}')
@@ -108,11 +106,31 @@ def mimic_custom_api(path: str):
     ctx.update(**decompose_inner_tokens(tokens))
     return ctx
 
+
+def error_catcher(path: str):
+    ctx = mimic_custom_api(path)
+    if not is_valid_frequency(ctx):
+        return dict(error=f"Frequency <{d['freq']}> is not valid")
+    if has_double_suffix(ctx):
+        return dict(error=f"Cannot combine <{d['agg']}> and <{d['rate']}>")
+    return ctx
+
+def has_double_suffix(d):
+    return d['agg'] and d['rate']
+
+
+def is_valid_frequency(d):
+    return d['freq'] in ALLOWED_FREQUENCIES
+
+
 if __name__ == "__main__":
+    import pytest
+    
     # api/{domain}/series/{varname}/{freq}/{?suffix}/{?start}/{?end}/{?finaliser}
     # {?rate}/{?agg} are mutually exclusive, we can either have {?rate} or {?agg}, so better call them {?suffix}
     # if {?suffix} is in (eop, avg) then {agg} is defined
     # if {?suffix} is in (yoy, rog) then {rate} is defined
+    
     test_pairs = {
         'api/oil/series/BRENT/m/eop/2015/2017/csv': {
             'domain': 'oil',
@@ -134,16 +152,20 @@ if __name__ == "__main__":
             'start': '2017',
             'end': None
         },
-        'api/ru/series/USDRUR/m/eop/1998/2000/xlsx': {
+                
+        # no aggregator, base frequency       
+        'api/ru/series/USDRUR/d/xlsx': {
             'domain': 'ru',
             'varname': 'USDRUR',
-            'freq': 'm',
+            'freq': 'd',
             'rate': None,
-            'agg': 'eop',
+            'agg': None,
             'fin': 'xlsx',
-            'start': '1998',
-            'end': '2000'
+            'start': None,
+            'end': None
         },
+                
+        # info should give details about time series, but not data        
         'api/ru/series/INDPRO/a/yoy/2013/2015/info': {
             'domain': 'ru',
             'varname': 'INDPRO',
@@ -154,17 +176,31 @@ if __name__ == "__main__":
             'start': '2013',
             'end': '2015'
         },
-        'api/oil/series/BRENT/q/rog/2005/2007/json': {
+                
+        # on next level this should be an error as 
+        # prices do not have 'rog' rate in database
+        'api/oil/series/BRENT/q/rog': {
             'domain': 'oil',
             'varname': 'BRENT',
             'freq': 'q',
             'rate': 'rog',
             'agg': None,
-            'fin': 'json',
-            'start': '2005',
-            'end': '2007'
+            'fin': None,
+            'start': None,
+            'end': None
         }
     }
         
     for url, d in test_pairs.items():
+        print (url, 'translates to', d)
         assert mimic_custom_api(url) == d
+
+    #examples that fail error_catcher()
+    e1 = error_catcher('api/oil/series/BRENT/q/rog/eop')
+    e2 = error_catcher('api/oil/series/BRENT/z/')
+    assert 'error' in e1.keys() 
+    assert 'error' in e2.keys()
+    
+    #TODO:
+    #    translate valid custom API call to db GET method call
+     
