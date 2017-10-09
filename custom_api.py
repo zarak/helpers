@@ -20,7 +20,10 @@ To integrate here:
 """
 
 from datetime import date
+
+import pandas as pd
 import requests
+
 
 ALLOWED_DOMAINS = (
     'ru',
@@ -157,6 +160,7 @@ def make_db_api_get_call_parameters(path):
 if __name__ == "__main__":
     
     from pprint import pprint
+    import io
 
     # valid urls 
     'api/oil/series/BRENT/m/eop/2015/2017/csv' # will fail of db GET call
@@ -237,7 +241,10 @@ if __name__ == "__main__":
     
     # using http, https fails loaclly
     endpoint = 'http://minikep-db.herokuapp.com/api/datapoints'
-    r = requests.get(endpoint, params=d)    
+    try:
+        r
+    except NameError:    
+        r = requests.get(endpoint, params=d)            
     assert r.status_code == 200
     data = r.json()
     control_datapoint_1 = {'date': '1992-07-01', 'freq': 'd', 'name': 'USDRUR_CB', 'value': 0.1253}
@@ -251,4 +258,24 @@ if __name__ == "__main__":
     
     # TODO: need 'pandas' formatting parameter or another database endpoint to be able
     # to use pd.read_json(<long url>)
+    
+    def to_json(dicts):    
+        df = pd.DataFrame(dicts)
+        df.date = df.date.apply(pd.to_datetime)
+        df = df.pivot(index='date', values='value', columns='name')
+        return df.to_json()
+    
+       
+    df = pd.DataFrame(data)
+    df.date = df.date.apply(pd.to_datetime)
+    #df is poper
+    df = df.pivot(index='date', values='value', columns='name')
+    
+    
+    # ERROR: something goes wrong with date handling
+    #        if we use df.to_json(), we shoudl be able to read it with pd.read_json()
+    f = io.StringIO(to_json(dicts=data))
+    df2 = pd.read_json(f)        
+    assert df.equals(df2)
+        
  
