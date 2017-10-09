@@ -241,6 +241,8 @@ if __name__ == "__main__":
     
     # using http, https fails loaclly
     endpoint = 'http://minikep-db.herokuapp.com/api/datapoints'
+    
+    # cut out calls to API if in interpreter
     try:
         r
     except NameError:    
@@ -251,10 +253,6 @@ if __name__ == "__main__":
     control_datapoint_2 = {'date': '2017-09-28', 'freq': 'd', 'name': 'USDRUR_CB', 'value': 58.0102}
     assert control_datapoint_1 in data
     assert control_datapoint_2 in data
-    
-    from requests import Request
-    req = Request('GET', url=endpoint, data=d)   
-    
     
     # TODO: need 'pandas' formatting parameter or another database endpoint to be able
     # to use pd.read_json(<long url>)
@@ -270,6 +268,9 @@ if __name__ == "__main__":
     df.date = df.date.apply(pd.to_datetime)
     #df is poper
     df = df.pivot(index='date', values='value', columns='name')
+    
+    assert df.USDRUR_CB['1992-07-01'] == control_datapoint_1['value']
+    assert df.USDRUR_CB['2017-09-28'] == control_datapoint_2['value']
     
     
     # ERROR: something goes wrong with date handling
