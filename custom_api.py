@@ -277,7 +277,8 @@ if __name__ == "__main__":
     #        if we use df.to_json(), we shoudl be able to read it with pd.read_json()
     data2 = to_json(dicts=data)
     f = io.StringIO(data2)
-    df2 = pd.read_json(f)        
+    df2 = pd.read_json(f, precise_float=True)        
+
+    df = df.sort_index()
+    df2 = df2.sort_index()
     assert df.equals(df2)
-        
- 
