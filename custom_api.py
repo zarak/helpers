@@ -43,8 +43,8 @@ ALLOWED_AGGREGATORS = (
 ALLOWED_FINALISERS = (
     'info',
     'csv',
-    'json_list', # should be default 
-    'json_pandas',  
+    'list', # default 
+    'pandas',  
     'xlsx'
 )
 
@@ -244,6 +244,11 @@ if __name__ == "__main__":
     control_datapoint_2 = {'date': '2017-09-28', 'freq': 'd', 'name': 'USDRUR_CB', 'value': 58.0102}
     assert control_datapoint_1 in data
     assert control_datapoint_2 in data
-        
-
+    
+    from requests import Request
+    req = Request('GET', url=endpoint, data=d)   
+    
+    
+    # TODO: need 'pandas' formatting parameter or another database endpoint to be able
+    # to use pd.read_json(<long url>)
  
