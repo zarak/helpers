@@ -1,10 +1,32 @@
-"""Decompose time series API URL."""
+"""Decompose time series API URL.
+
+URL format:
+    
+    {domain}/series/{varname}/{freq}/{?suffix}/{?start}/{?end}/{?finaliser}
+    
+Rule1:
+    {?suffix} is translated to unit in a simple version (v1)              
+    
+Rule2:
+    in a v2 version: 
+        {?suffix} is {?rate} or {?agg} they are mutually exclusive:
+            if {?suffix} is in (eop, avg) then {agg} is defined
+            if {?suffix} is in (yoy, rog, base) then {rate} is defined
+            {unit} name must be defined 
+            
+To integrate here:    
+    <https://github.com/mini-kep/frontend-app/blob/master/apps/views/time_series.py>    
+
+"""
+
+from datetime import date
+import requests
 
 ALLOWED_DOMAINS = (
     'ru',
     'oil',
     'all',
-    # some else?
+    # more domains?
 )
 
 ALLOWED_FREQUENCIES = 'dwmqa'
@@ -21,186 +43,207 @@ ALLOWED_AGGREGATORS = (
 ALLOWED_FINALISERS = (
     'info',
     'csv',
-    'json',  # should be default
+    'json_list', # should be default 
+    'json_pandas',  
     'xlsx'
 )
 
-
-def get_years(tokens):
-    """Extract years from a list of *tokens* strings."""
-    start, end = None, None
-    integers = [x for x in tokens if x.isdigit()]
-    if len(integers) == 1:
-        start = integers[0]
-    elif len(integers) == 2:
-        start = integers[0]
-        end = integers[1]
-    return start, end
-
-
-def assign_values(tokens, allowed_values):
-    """Find entries of *allowed_values* into *tokens*."""
-    values_found = [p for p in allowed_values if p in tokens]
-    if not values_found:
-        return None
-    elif len(values_found) == 1:
-        return values_found[0]
-    else:
-        raise ValueError(values_found)
-
-
-def decompose_inner_path(inner_path: str):
-    """Return dictionary with custom API parameters from *inner_path*"""
-    tokens = [token.strip() for token in inner_path.split('/') if token]
-    return decompose_inner_tokens(tokens)
-
-
-def decompose_inner_tokens(tokens):
-    s, e = get_years(tokens)
-    return dict(rate  = assign_values(tokens, ALLOWED_REAL_RATES),
-                agg   = assign_values(tokens, ALLOWED_AGGREGATORS),
-                fin   = assign_values(tokens, ALLOWED_FINALISERS),
-                start = s,
-                end   = e)
-
-
+class InnerPath:   
+    
+    def __init__(self, inner_path: str):
+        """Extract parameters from *inner_path* string.
+           
+           Args:
+              inner_path is a string like 'eop/2015/2017/csv' 
+        """        
+        # *tokens* is a list of non-empty strings
+        tokens = [token.strip() for token in inner_path.split('/') if token]        
+        # date parameters
+        self.dict = self.assign_dates(tokens)
+        # finaliser
+        self.dict['fin']  = self.assign_values(tokens, ALLOWED_FINALISERS)
+        # transforms
+        self.dict['rate'] = self.assign_values(tokens, ALLOWED_REAL_RATES)
+        self.dict['agg']  = self.assign_values(tokens, ALLOWED_AGGREGATORS)
+        if self.dict['rate'] and self.dict['agg']:
+            raise ValueError("Cannot combine rate and aggregation.")
+        # unit name
+        if tokens:
+            self.dict['unit'] = tokens[0]
+        else:
+            self.dict['unit'] = self.dict['rate'] or None
         
-# NOT USED NOW:
-#BASE_URL = 'api/series/{string:domain}/{string:varname}/{string:freq}'
-#@ts.route(f'{BASE_URL}')
-#@ts.route(f'{BASE_URL}/<path:inner_path>')
+    def get_dict(self):
+        return self.dict
 
+    def assign_dates(self, tokens):
+        result = {}
+        start_year, end_year = self.get_years(tokens)
+        result['start_date'] = self.as_date(start_year, month=1, day=1)
+        result['end_date'] = self.as_date(end_year, month=12, day=31)  
+        return result 
 
-def time_series_api_interface(domain, varname, freq, inner_path=None):
-    """Decompose incoming URL into API request."""
+    @staticmethod
+    def as_date(year: str, month: int, day: int):
+        if year:
+            return date(year=int(year), 
+                        month=month, 
+                        day=day).strftime('%Y-%m-%d')
+        else:
+            return year             
 
-    # FIXME: must use validate_freq() here
-    if freq not in 'dwmqa':
-        return jsonify({
-            'error': "Frequency value is invalid"
-        }), 400
-    # ---------------
-    ctx = {
-        'domain': domain,
-        'varname': varname,
-        'frequency': freq,
-        'rate': None,
-        'agg': None,
-        'start': None,
-        'end': None
-    }
-    if inner_path is not None:
-        optional_args = decompose_inner_path(inner_path)
-        ctx.update(**optional_args)
-    return jsonify(ctx)
-# END ---
+    @staticmethod
+    def get_years(tokens):
+        """Extract years from a list of *tokens* strings."""
+        start, end = None, None
+        integers = [x for x in tokens if x.isdigit()]
+        if len(integers) in (1, 2):
+            start = integers[0]
+            tokens.pop(tokens.index(start))
+        if len(integers) == 2:
+            end = integers[1]
+            tokens.pop(tokens.index(end))
+        return start, end
 
+    @staticmethod
+    def assign_values(tokens, allowed_values):
+        """Find entries of *allowed_values* into *tokens*."""
+        values_found = [p for p in allowed_values if p in tokens]
+        if not values_found:
+            return None
+        elif len(values_found) == 1:
+            x = values_found[0]
+            tokens.pop(tokens.index(x))
+            return x
+            
+        else:
+            raise ValueError(values_found)
 
-# decode path like 'api/oil/series/BRENT/m/eop/2015/2017/csv'
+def get_freq(freq: str):
+    if freq not in ALLOWED_FREQUENCIES:
+        raise ValueError(f"Frequency <{freq}> is not valid")
+    return freq
+
 def mimic_custom_api(path: str):
+    """Decode path like: 
+    
+       api/oil/series/BRENT/m/eop/2015/2017/csv
+index    0   1      2     3 4   5 .... 
+       
+    """
     assert path.startswith('api/')
     tokens = [token.strip() for token in path.split('/') if token]
+    # mandatoy part - in actual code taken care by flask
     ctx = dict(domain=tokens[1],
                varname=tokens[3],
-               freq=tokens[4])
-    ctx.update(**decompose_inner_tokens(tokens))
+               freq=get_freq(tokens[4]))
+    # optional part
+    if len(tokens) >= 6:
+        inner_path_str = "/".join(tokens[5:])
+        d = InnerPath(inner_path_str).get_dict()        
+        ctx.update(d)
     return ctx
 
-
-def error_catcher(path: str):
+def make_db_api_get_call_parameters(path):
     ctx = mimic_custom_api(path)
-    if not is_valid_frequency(ctx):
-        return dict(error=f"Frequency <{d['freq']}> is not valid")
-    if has_double_suffix(ctx):
-        return dict(error=f"Cannot combine <{d['agg']}> and <{d['rate']}>")
-    return ctx
-
-def has_double_suffix(d):
-    return d['agg'] and d['rate']
-
-
-def is_valid_frequency(d):
-    return d['freq'] in ALLOWED_FREQUENCIES
-
+    name, unit = (ctx[key] for key in ['varname', 'unit'])
+    if unit:
+        name = f"{name}_{unit}"
+    params = dict(name=name,  freq=ctx['freq'])
+    upd = [(key, ctx[key]) for key in ['start_date', 'end_date'] if ctx[key]]
+    params.update(upd)
+    return params       
 
 if __name__ == "__main__":
-    import pytest
     
-    # api/{domain}/series/{varname}/{freq}/{?suffix}/{?start}/{?end}/{?finaliser}
-    # {?rate}/{?agg} are mutually exclusive, we can either have {?rate} or {?agg}, so better call them {?suffix}
-    # if {?suffix} is in (eop, avg) then {agg} is defined
-    # if {?suffix} is in (yoy, rog) then {rate} is defined
+    from pprint import pprint
+
+    # valid urls 
+    'api/oil/series/BRENT/m/eop/2015/2017/csv' # will fail of db GET call
+    'api/ru/series/EXPORT_GOODS/m/bln_rub' # will pass
+    'api/ru/series/USDRUR_CB/d/xlsx' # will fail
+    
+    # FIXME: test for failures
+    # invalid urls
+    'api/oil/series/BRENT/q/rog/eop'
+    'api/oil/series/BRENT/z/'
     
     test_pairs = {
         'api/oil/series/BRENT/m/eop/2015/2017/csv': {
             'domain': 'oil',
             'varname': 'BRENT',
+            'unit': None,
             'freq': 'm',
             'rate': None,
-            'start': '2015',
-            'end': '2017',
+            'start_date': '2015-01-01',
+            'end_date': '2017-12-31',
             'agg': 'eop',
             'fin': 'csv'
         },
-        'api/ru/series/USDRUR/m/avg/2017': {
+        'api/ru/series/EXPORT_GOODS/m/bln_rub': {
             'domain': 'ru',
-            'varname': 'USDRUR',
+            'varname': 'EXPORT_GOODS',
+            'unit': 'bln_rub',            
             'freq': 'm',
             'rate': None,
-            'agg': 'avg',
+            'agg': None,
             'fin': None,
-            'start': '2017',
-            'end': None
+            'start_date': None,
+            'end_date': None
         },
                 
-        # no aggregator, base frequency       
-        'api/ru/series/USDRUR/d/xlsx': {
+        'api/ru/series/USDRUR_CB/d/xlsx': {
             'domain': 'ru',
-            'varname': 'USDRUR',
+            'varname': 'USDRUR_CB',
             'freq': 'd',
+            'unit': None,
             'rate': None,
             'agg': None,
             'fin': 'xlsx',
-            'start': None,
-            'end': None
-        },
-                
-        # info should give details about time series, but not data        
-        'api/ru/series/INDPRO/a/yoy/2013/2015/info': {
-            'domain': 'ru',
-            'varname': 'INDPRO',
-            'freq': 'a',
-            'rate': 'yoy',
-            'agg': None,
-            'fin': 'info',
-            'start': '2013',
-            'end': '2015'
-        },
-                
-        # on next level this should be an error as 
-        # prices do not have 'rog' rate in database
-        'api/oil/series/BRENT/q/rog': {
-            'domain': 'oil',
-            'varname': 'BRENT',
-            'freq': 'q',
-            'rate': 'rog',
-            'agg': None,
-            'fin': None,
-            'start': None,
-            'end': None
+            'start_date': None,
+            'end_date': None
         }
+                
     }
         
     for url, d in test_pairs.items():
-        print (url, 'translates to', d)
+        print()
+        print (url)
+        pprint(d)
         assert mimic_custom_api(url) == d
+        print(make_db_api_get_call_parameters(url))
+        
+    test_pairs2 = {
+        'api/oil/series/BRENT/m/eop/2015/2017/csv': {
+                'name': 'BRENT', 
+                'freq': 'm', 
+                'start_date': '2015-01-01', 
+                'end_date': '2017-12-31'},
+                
+        'api/ru/series/EXPORT_GOODS/m/bln_rub': {
+                'name': 'EXPORT_GOODS_bln_rub', 
+                'freq': 'm'},
+                
+        'api/ru/series/USDRUR_CB/d/xlsx': {
+                'name': 'USDRUR_CB', 
+                'freq': 'd'}
+    }
+        
+    for url, d in test_pairs2.items():
+        assert make_db_api_get_call_parameters(url) == d
 
-    #examples that fail error_catcher()
-    e1 = error_catcher('api/oil/series/BRENT/q/rog/eop')
-    e2 = error_catcher('api/oil/series/BRENT/z/')
-    assert 'error' in e1.keys() 
-    assert 'error' in e2.keys()
+    # get actual data from url 
+    # http://minikep-db.herokuapp.com/api/datapoints?name=USDRUR_CB&freq=d&start_date=2017-08-01&end_date=2017-10-01
     
-    #TODO:
-    #    translate valid custom API call to db GET method call
-     
+    # using http, https fails loaclly
+    endpoint = 'http://minikep-db.herokuapp.com/api/datapoints'
+    r = requests.get(endpoint, params=d)    
+    assert r.status_code == 200
+    data = r.json()
+    control_datapoint_1 = {'date': '1992-07-01', 'freq': 'd', 'name': 'USDRUR_CB', 'value': 0.1253}
+    control_datapoint_2 = {'date': '2017-09-28', 'freq': 'd', 'name': 'USDRUR_CB', 'value': 58.0102}
+    assert control_datapoint_1 in data
+    assert control_datapoint_2 in data
+        
+
+ 
