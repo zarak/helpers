@@ -275,7 +275,8 @@ if __name__ == "__main__":
     
     # ERROR: something goes wrong with date handling
     #        if we use df.to_json(), we shoudl be able to read it with pd.read_json()
-    f = io.StringIO(to_json(dicts=data))
+    data2 = to_json(dicts=data)
+    f = io.StringIO(data2)
     df2 = pd.read_json(f)        
     assert df.equals(df2)
         
